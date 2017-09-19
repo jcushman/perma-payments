@@ -20,6 +20,7 @@ from django.contrib import admin
 urlpatterns = []
 
 if settings.ADMIN_ENABLED:
+    # use settings.ADMIN_URL or something along those lines for this so it isn't in version control
     urlpatterns.extend([url(r'^lilushka/', admin.site.urls)])
 
 urlpatterns.extend([

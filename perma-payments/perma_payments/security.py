@@ -4,6 +4,8 @@ from datetime import timedelta, datetime
 import hashlib
 import hmac
 import json
+
+from nacl import encoding
 from nacl.public import Box, PrivateKey, PublicKey
 from werkzeug.security import safe_str_cmp
 
@@ -39,7 +41,10 @@ def prep_for_cybersource(signed_fields, unsigned_fields={}):
     Note: if additional fields are POSTed, or if any of these fields fail to be POSTed,
     CyberSource will reject the communication's signature and return 403 Forbidden.
     """
+
+    # Nitpick -- safer to avoid modifying a passed-in dictionary, and create a copy.
     signed_fields['unsigned_field_names'] = ','.join(sorted(unsigned_fields))
+    # extra line
     signed_fields['signed_field_names'] = ''
     signed_fields['signed_field_names'] = ','.join(sorted(signed_fields))
     data_to_sign = stringify_for_signature(signed_fields)
@@ -54,6 +59,8 @@ def process_cybersource_transmission(transmitted_data, fields):
     # Transmitted data must include signature, signed_field_names,
     # and all fields listed in signed_field_names
     try:
+        # why is this using .__getitem__ instead of [] ?
+        # maybe add a comment if there's a reason
         signature = transmitted_data.__getitem__('signature')
         signed_field_names = transmitted_data.__getitem__('signed_field_names')
         signed_fields = OrderedDict()
@@ -184,18 +191,25 @@ def generate_public_private_keys():
     }
 
 
+# use stringify_data here? JSON encoding will make it easier to parse again if we need to, I think.
+# (Or does stringify_data actually work in place of this function?)
 def stringify_request_post_for_encryption(post):
     return bytes(str(post.dict()), 'utf-8')
 
 
+# delete this -- see below
 def nonce_from_pk(o):
     return (o.pk).to_bytes(24, byteorder='big')
 
 
+# Don't accept a nonce or pass one into box.encrypt, just let pynacl generate one. Random nonces are safer than requiring callers to ensure uniqueness.
 def encrypt_for_storage(message, nonce):
     """
     Basic public key encryption ala pynacl.
     N.B. This should be updated to SealedBox as soon as PyNacl 1.2.0 comes out.
+
+    Is 1.2.0 coming out before launch? If not we should either install from github or implement SealedBox ourselves, right?
+    Here's a pure python implementation that works with existing PyNacl: https://gist.github.com/lmctv/d76a2ebefd3227c461ff5450ea487a11
     """
     box = Box(PrivateKey(settings.STORAGE_ENCRYPTION_KEYS['app_secret_key']), PublicKey(settings.STORAGE_ENCRYPTION_KEYS['vault_public_key']))
     return box.encrypt(message, nonce)
@@ -220,19 +234,22 @@ def decrypt_from_storage(ciphertext):
     return box.decrypt(ciphertext)
 
 
+# For convenience, modified below to suggest including base64 encoding in the API for these functions, rather than requiring callers to do it.
+# (callers can opt out if they want by passing encoder=encoding.RawEncoder)
+
 @sensitive_variables()
-def encrypt_for_perma(message):
+def encrypt_for_perma(message, encoder=encoding.Base64Encoder):
     """
     Basic public key encryption ala pynacl.
     """
     box = Box(PrivateKey(settings.PERMA_ENCRYPTION_KEYS['perma_payments_secret_key']), PublicKey(settings.PERMA_ENCRYPTION_KEYS['perma_public_key']))
-    return box.encrypt(message)
+    return box.encrypt(message, encoder=encoder)
 
 
 @sensitive_variables()
-def decrypt_from_perma(ciphertext):
+def decrypt_from_perma(ciphertext, encoder=encoding.Base64Encoder):
     """
     Decrypt bytes encrypted by perma.cc
     """
     box = Box(PrivateKey(settings.PERMA_ENCRYPTION_KEYS['perma_payments_secret_key']), PublicKey(settings.PERMA_ENCRYPTION_KEYS['perma_public_key']))
-    return box.decrypt(ciphertext)
+    return box.decrypt(ciphertext, encoder=encoder)

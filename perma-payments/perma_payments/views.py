@@ -118,7 +118,9 @@ def subscribe(request):
         return bad_request(request)
 
     # The user must not already have a standing subscription.
+    # Do we need any handling here for Current vs Hold statuses?
     if SubscriptionAgreement.registrar_standing_subscription(data['registrar']):
+        # Use DEFAULT_FROM_EMAIL?
         return render(request, 'generic.html', {'heading': "Good News!",
                                                 'message': "You already have a subscription to Perma.cc.<br>" +
                                                            "If you believe you have reached this page in error, please contact us at <a href='mailto:info@perma.cc?subject=Our%20Subscription'>info@perma.cc</a>."})
@@ -186,6 +188,7 @@ def update(request):
         sa = SubscriptionAgreement.registrar_standing_subscription(data['registrar'])
         assert sa and sa.can_be_altered()
     except AssertionError:
+        # Use DEFAULT_FROM_EMAIL?
         return render(request, 'generic.html', {'heading': "We're Having Trouble With Your Update Request",
                                                 'message': "We can't find any active subscriptions associated with your account.<br>" +
                                                            "If you believe this is an error, please contact us at <a href='mailto:info@perma.cc?subject=Our%20Subscription'>info@perma.cc</a>."})
@@ -201,7 +204,7 @@ def update(request):
         u_request.full_clean()
         u_request.save()
     except ValidationError as e:
-        logger.warning('Invalid POST from Perma.cc subscribe form: {}'.format(e))
+        logger.warning('Invalid POST from Perma.cc update form: {}'.format(e))
         return bad_request(request)
 
     # Bounce the user to CyberSource.
@@ -329,6 +332,7 @@ def cybersource_callback(request):
             subscription_agreement.save()
             logger.error("Error submitting subscription request {} to CyberSource for registrar {}. Redacted reponse: {}".format(related_request.pk, registrar, non_sensitive_params))
         else:
+            # Shouldn't we set a status for this case too? And then move the save() out of the if/else ...
             logger.error("Unexpected decision from CyberSource regarding subscription request {} for registrar {}. Please investigate ASAP. Redacted reponse: {}".format(related_request.pk, registrar, non_sensitive_params))
 
     else:
@@ -415,6 +419,7 @@ def cancel_request(request):
     return redirect(settings.PERMA_SUBSCRIPTION_CANCELLED_REDIRECT_URL)
 
 
+# Doesn't this view need to be authenticated somehow?
 @require_http_methods(["POST"])
 def update_statuses(request):
     csv_file = request.FILES['csv_file']

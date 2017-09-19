@@ -7,6 +7,7 @@
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta name="viewport" content="width=device-width, initial-scale=1">
     {% block title %}<title>{{ heading }}</title>{% endblock title %}
+    <!-- let's avoid third party includes like this font ... -->
     <link href="//fonts.googleapis.com/css?family=Raleway:400,300,600" rel="stylesheet" type="text/css">
     <link rel="shortcut icon" type="image/x-icon" href="{% static 'perma_payments/img/favicon.png' %}">
     {% block css %}

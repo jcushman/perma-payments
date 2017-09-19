@@ -14,3 +14,6 @@ perma-payments/config/settings/settings.py
 .hypothesis/
 # except for the examples directory
 !.hypothesis/examples/
+
+# IDE files
+.idea

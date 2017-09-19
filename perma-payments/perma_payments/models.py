@@ -30,9 +30,15 @@ def generate_reference_number():
     Generate a unique, human-friendly reference number. Based on Perma GUID generation.
 
     Only make 100 attempts:
-    If there are requent collisions, expand the keyspace or change the prefix.
+    If there are frequent collisions, expand the keyspace or change the prefix.
     """
     for i in range(100):
+        # Generating the reference number feels overly complex here. What about something like this?
+        rn = "PERMA-{}-{}".format(
+            "".join(random.choices(RN_SET, k=4)),
+            "".join(random.choices(RN_SET, k=4))
+        )
+
         rn = get_formatted_reference_number(random.choices(RN_SET, k=8), REFERENCE_NUMBER_PREFIX)
         if is_ref_number_available(rn):
             break
@@ -66,6 +72,12 @@ def is_ref_number_available(rn):
 #
 # CLASSES
 #
+
+# We might want to track history of this model rather than just keeping the latest status and update date.
+# We use django-simple-history for this purpose in the perma codebase, although I don't have a strong feeling about what library is best.
+
+# (Keeping a last update date in general strikes me as a nudge that you might want to track history -- if you care
+# when it was last updated, you might also want to see what it was before.)
 
 class SubscriptionAgreement(models.Model):
     """
@@ -136,6 +148,9 @@ class SubscriptionAgreement(models.Model):
 
     @classmethod
     def registrar_standing_subscription(cls, registrar):
+        # Nitpick -- I think this uses two sql queries to first check count() and then fetch the first one. I might do it as:
+        #    standing = cls.objects.filter(...)[:2]
+        # then you have a python list of 0 to 2 objects to work with
         standing = cls.objects.filter(registrar=registrar, status__in=STANDING_STATUSES)
         count = len(standing)
         if count == 0:
@@ -144,6 +159,11 @@ class SubscriptionAgreement(models.Model):
             logger.error("Registrar {} has multiple standing subscriptions ({})".format(registrar, count))
             if settings.RAISE_IF_MULTIPLE_SUBSCRIPTIONS_FOUND:
                 raise cls.MultipleObjectsReturned
+
+            # Maybe add a comment here to explain (in a few words) that we think it's OK to return the first subscription if multiple exist.
+
+            # Also maybe add a sort order to this model (sort by id?), so we'll deterministically return the same object in this case --
+            # nondeterminism can set folks up for bafflement in the future.
         return standing.first()
 
 
@@ -163,6 +183,7 @@ class OutgoingTransaction(PolymorphicModel):
         help_text="A unique ID for this 'transaction'. " +
                   "Intended to protect against duplicate transactions."
     )
+    # Does "auto_now_add=True, null=True" make sense? Seems like it would never be null
     request_datetime = models.DateTimeField(auto_now_add=True, null=True)
 
     def get_formatted_datetime(self):
@@ -192,7 +213,7 @@ class SubscriptionRequest(OutgoingTransaction):
         max_length=32,
         default=generate_reference_number,
         help_text="Unqiue ID for this subscription. " +
-                  "Subsequent charges, automatically made byCyberSource onthe recurring schedule, " +
+                  "Subsequent charges, automatically made by CyberSource on the recurring schedule, " +
                   "will all be associated with this reference number. " +
                   "Called 'Merchant Reference Number' in CyberSource Business Center."
     )
@@ -216,12 +237,12 @@ class SubscriptionRequest(OutgoingTransaction):
         max_length=20,
         choices=(
             ('weekly', 'weekly'),  # every 7 days.
-            ('bi-weekly', 'bi-weekly'),  # every 2 weeks.
-            ('quad-weekly', 'quad-weekly'),  # every 4 weeks.
+            ('bi-weekly', 'bi-weekly (every 2 weeks)'),  # every 2 weeks.
+            ('quad-weekly', 'quad-weekly (every 4 weeks)'),  # every 4 weeks.
             ('monthly', 'monthly'),
-            ('semi-monthly', 'semi-monthly'),  # twice every month (1st and 15th).
+            ('semi-monthly', 'semi-monthly (1st and 15th of each month)'),  # twice every month (1st and 15th).
             ('quarterly', 'quarterly'),
-            ('semi-annually', 'semi-annually'),  # twice every year.
+            ('semi-annually', 'semi-annually (twice every year)'),  # twice every year.
             ('annually', 'annually')
         )
     )
@@ -264,8 +285,9 @@ class UpdateRequest(OutgoingTransaction):
     3) comparing notes with CyberSource records
     """
     def __str__(self):
-        return 'SubscriptionRequest {}'.format(self.id)
+        return 'UpdateRequest {}'.format(self.id)
 
+    # related_name should be plural update_requests, right?
     subscription_agreement = models.ForeignKey(
         SubscriptionAgreement,
         related_name='update_request'
@@ -337,13 +359,15 @@ class Response(PolymorphicModel):
         """
         raise NotImplementedError
 
-
+    # typo in this method name -- encryped instead of encrypted. Also suggest "with" instead of "w"
     @classmethod
     def save_new_w_encryped_full_response(cls, response_class, full_response, fields):
         """
         Saves a new instance of type response_class, encrypting the
         'full_response' field
         """
+        # Security issue: don't pass in a custom nonce here. This means that encrypt_for_storage() is insecure to use for anything *except*
+        # one message per OutgoingTransaction, which is an easy-to-mess-up API. Just let pynacl generate the nonce.
         data = {
             'encryption_key_id': settings.STORAGE_ENCRYPTION_KEYS['id'],
             'full_response': encrypt_for_storage(
